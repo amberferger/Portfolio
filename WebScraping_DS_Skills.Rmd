@@ -1,0 +1,388 @@
+---
+title: 'Project 3- Soft skills for Data Scientists'
+author: "Amber Ferger & Geethanjali Padmaperuma"
+date: "10/17/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Assignment
+W. Edwards Deming said, “In God we trust, all others must bring data.”   Please use data to answer the question, “Which are the most valued data science skills?” 
+
+Consider your work as an exploration; there is not necessarily a “right answer.” 
+Grading rubric: 
+
+* You will need to determine what tool(s) you’ll use as a group to effectively collaborate, share code and any project documentation (such as motivation, approach, findings). 
+* You will have to determine what data to collect, where the data can be found, and how to load it. 
+* The data that you decide to collect should reside in a relational database, in a set of normalized tables. 
+* You should perform any needed tidying, transformations, and exploratory data analysis in R. 
+* Your deliverable should include all code, results, and documentation of your motivation, approach, and findings. 
+* As a group, you should appoint (at least) three people to lead parts of the presentation. 
+* While you are strongly encouraged (and will hopefully find it fun) to try out statistics and data models, your grade will not be affected by the statistical analysis and modeling performed (since this is a semester one course on Data Acquisition and Management). 
+* Every student must be prepared to explain how the data was collected, loaded, transformed, tidied, and analyzed for outliers, etc. in our Meetup.  This is the only way I’ll have to determine that everyone actively participated in the process, so you need to hold yourself responsible for understanding what your class-size team did!  If you are unable to attend the meet up, then you need to either present to me one-on-one before the meetup presentation, or post a 3 to 5 minute video (e.g. on YouTube) explaining the process.  Individual students will not be responsible for explaining any forays into statistical analysis, modeling, data mining, regression, decision trees, etc
+
+### Selecting a website 
+Our approach to this project was to identify a website that listed a variety of job postings related to Data Science. In deciding which platform to use (ex: Linkedin, indeed, glassdoor), we realized that many of the sites included information in a non-standardized way. For example, one posting might list the skills under a section titled "Requirements" whereas another posting might list them under a section titled "Experience".
+
+After a bit of searching, we found a site titled **onetonline.org** that included a standardized template for postings. A user can go to the website and search for a general job type in the Occupational Search section to bring up relevant listings. 
+
+![](WebScraping_img1.png)
+
+### Approach
+After searching for the term **Data Scientist** on the website, we were directed to a page with a number of links to relevant postings. (see below)
+
+![](WebScraping_img2.png)
+
+Each link includes a standard template with information. The nice thing about this website is that it breaks down the requirements into a number of general categories, including Technology Skills, Abilities, Skills, and Knowledge. Because we are focusing on the soft skills of data science, we decided to limit our pull to only those skills listed in the **Skills** and **Abilities** sections.
+
+![](WebScraping_img3.png)
+
+
+### Strategy
+Our approach to gathering all of the information was to:
+
+* Pull in the html from the results page of the Data Scientist search
+* Grab all of the websites that were linked to the postings
+* Cycle through each website to extract the relevant skills and abilities for that position
+* Add in the job title and website and classify each record as sourced from the SKILLS or ABILITIES section
+* Combine all results in 1 data frame
+* Load data into a relational database
+* Analyze listings to see what skills appear the most in the set
+
+
+## Libraries
+For this project, we will use the **rvest** package for all of the html extraction. **Stringr** will be used to identify the appropriate websites to cycle through and **tidyverse* will be used for our data cleansing. 
+
+```{r, message = FALSE}
+library(rvest)
+library(tidyverse)
+library(stringr)
+```
+
+### Gather Websites for Relevant Job Postings
+First, we will need to read in all of the websites that contain our data of interest. Looking at the html on the page, we can see that the job postings are wrapped in tags that have a class of **report2ed**. We will use a combination of html_nodes (filtered for our class of interest), html_children, and html_attr to pull in the websites associated with all of these postings. We will then eliminate any websites that don't start with https://.
+
+```{r warning=FALSE}
+
+htmlURL <- 'https://www.onetonline.org/find/result?s=data%20scientist&a=1'
+page <- read_html(htmlURL)
+
+#parse out the websites for the links
+websites <- page %>% 
+  html_nodes("td.report2ed") %>% 
+  html_children() %>%
+  html_attr('href') 
+
+finalWebsites <- websites[str_detect(websites,'https://*')]
+finalWebsites1<- finalWebsites[1:3]
+
+```
+
+### Job Posting Skills
+Next, we will cycle through each website to extract the information from the **Skills** and **Abilities** sections. We will add in the job title and website as well as a distinction between Skills and Abilities. All of this information will be compiled into 1 final dataframe. 
+
+```{r warning=FALSE}
+
+finalJobInfo <- data.frame()
+
+seqList <- seq(1:length(finalWebsites))
+
+
+for (i in seqList)
+{
+jobURL <- finalWebsites[i]
+#jobURL <- 'https://www.onetonline.org/link/summary/15-1111.00'
+jobWebsite <- read_html(jobURL)
+
+# Parse out the job title
+jobTitle <- jobWebsite %>%
+  html_nodes("span.titleb") %>%
+  html_text()
+
+
+############################################
+# Job skills
+############################################
+
+# Parse out the job skills
+jobSkills <- jobWebsite %>%
+  html_nodes("div.section_Skills") %>%
+  html_text()
+
+jobSkills <- jobSkills[2]
+
+# convert to tibble, add in job title to record
+jobSkills <- as.tibble(jobSkills)
+jobSkills$JOB_TITLE <- jobTitle
+
+# split the string into 1 row for each skill listed
+s1 <- str_split(jobSkills$value, '\n\n\n\n')
+jobSkills <- data.frame(JOB_TITLE = rep(jobSkills$JOB_TITLE, sapply(s1, length)), value = unlist(s1))
+
+jobSkills$TYPE <- 'SKILLS'
+
+
+############################################
+# Job abilities
+############################################
+
+# Parse out the job abilities
+jobAbilities<- jobWebsite %>%
+  html_nodes("div.section_Abilities") %>%
+  html_text()
+
+jobAbilities <- jobAbilities[2]
+
+# convert to tibble, add in job title to record
+jobAbilities <- as.tibble(jobAbilities)
+jobAbilities$JOB_TITLE <- jobTitle
+
+# split the string into 1 row for each ability listed
+s <- str_split(jobAbilities$value, '\n\n\n\n')
+jobAbilities <- data.frame(JOB_TITLE = rep(jobAbilities$JOB_TITLE, sapply(s, length)), value = unlist(s))
+
+jobAbilities$TYPE <- 'ABILITY'
+
+
+jobInfo <- rbind(jobAbilities,jobSkills)
+jobInfo$WEBSITE <- jobURL
+
+finalJobInfo <- rbind(finalJobInfo, jobInfo)
+
+}
+
+```
+
+### Tidying up the data
+Now that all of the information is compiled in one large data frame, we will clean it up a bit. First, we'll add in a column called **SOURCE** that will contain an indication of where the information is taken from. Then, we'll remove any records that don't have "value" filled in, reorder the columns, and rename the "value" field. 
+```{r}
+
+finalJobInfo2<- as_tibble(finalJobInfo)
+finalJobInfo2$SOURCE <- 'ONET'
+
+finalJobInfo2 <- finalJobInfo2 %>%
+  filter(value != '') %>%
+  select(SOURCE,JOB_TITLE,WEBSITE,TYPE,value) %>%
+  rename(SKILL=value)
+
+```
+
+
+## Table Structure
+We are going to create a table structure that is flexible enough to allow us to incorporate new information (from other sources) in the future. To do so, we will create 4 tables:
+
+* **JOB_SKILLS:** This will act as our "fact" table that includes a key for the JOB_TITLE/SOURCE columns, a key for the TYPE column, and a key for the SKILL column
+* **JOB_POSTING:** This will contain the key for the JOB_TITLE/SOURCE column and the website name; Additional fields can be added to this table that incorporate more information about the specific posting
+* **SKILL_TYPE:** This will contain the key for the TYPE column with the associated type; Having this table will allow additional types of skills to be added to the table moving forward
+* **SKILLS:** This will contain the key for the SKILL column and the description of the skill
+
+All of these tables can be linked to provide the same information that is contained in the finalJobInfo2 table. 
+
+
+# Create table keys
+First, we'll need to create a key for each of the groupings mentioned above. 
+
+```{r}
+
+finalJobInfo2$SKILL_KEY <- finalJobInfo2 %>%
+  group_indices(SKILL)
+
+finalJobInfo2$SKILL_TYPE_KEY <- finalJobInfo2 %>%
+  group_indices(TYPE)
+
+finalJobInfo2$JOB_POSTING_KEY <- finalJobInfo2 %>%
+  group_indices(JOB_TITLE,SOURCE)
+
+```
+
+
+# Create table structures
+Now that we have the keys created, we can split the data into the 4 tables mentioned above. We'll store these in a csv file and them upload them into a relational database for later use. 
+
+```{r}
+
+SKILLS <- as.data.frame(unique(finalJobInfo2[c("SKILL_KEY","SKILL")]))
+SKILL_TYPE <- as.data.frame(unique(finalJobInfo2[c("SKILL_TYPE_KEY","TYPE")]))
+JOB_POSTING <- as.data.frame(unique(finalJobInfo2[c("JOB_POSTING_KEY","JOB_TITLE", "SOURCE", "WEBSITE")]))
+
+JOB_SKILLS <- finalJobInfo2 %>%
+  select(JOB_POSTING_KEY,SKILL_TYPE_KEY,SKILL_KEY)
+  
+write.csv(SKILLS,"SKILLS.csv")
+write.csv(SKILL_TYPE, "SKILL_TYPE.csv")
+write.csv(JOB_POSTING, "JOB_POSTING.csv")
+write.csv(JOB_SKILLS, "JOB_SKILLS.csv")
+
+```
+
+### Analysis
+Now that we have the raw data, let's start to take a look at it. First, we'll have to load it into R.
+
+# Libraries
+```{r}
+library(RMySQL)
+library(ggplot2)
+```
+
+
+```{r, echo = FALSE}
+mydb = dbConnect(MySQL(), user='root', password='replace', dbname='hw', host='localhost')
+```
+
+```{r}
+
+jobData <- dbGetQuery(mydb, "
+SELECT 
+	jobPosting.SOURCE,
+    jobPosting.JOB_TITLE,
+    jobPosting.WEBSITE,
+    skillType.TYPE,
+    CASE 	WHEN LEFT(skills.SKILL, LOCATE('?',skills.SKILL))= '' THEN skills.SKILL
+			ELSE LEFT(skills.SKILL, LOCATE('?',skills.SKILL)-1) END AS SKILL,
+	CASE 	WHEN LEFT(skills.SKILL, LOCATE('?',skills.SKILL))= '' THEN ''
+			ELSE RIGHT(skills.SKILL, LENGTH(skills.SKILL)-LOCATE('?',skills.SKILL)-1) END AS SKILL_DESCRIPTION 
+FROM hw.job_skills jobSkills
+
+INNER JOIN hw.job_posting jobPosting ON jobSkills.JOB_POSTING_KEY = jobPosting.JOB_POSTING_KEY
+INNER JOIN hw.skill_type skillType ON jobSkills.SKILL_TYPE_KEY = skillType.SKILL_TYPE_KEY 
+INNER JOIN hw.skills skills ON jobSkills.SKILL_KEY = skills.SKILL_KEY"
+)
+
+```
+
+Notice in our SQL pull, we separated out the skill into a skill and a description column. Because not all data will have this format, we created a case statement that will account for this. 
+
+Now that we have the data loaded, let's take a look at what the top skills are: 
+
+```{r}
+skillFrequency <- as.data.frame(table(jobData$SKILL)%>% sort(decreasing= TRUE))
+colnames(skillFrequency) <- c('Skill', 'Frequency')
+skillFrequency[1:20,]
+
+
+top_n(skillFrequency, n=20, Frequency) %>%
+          ggplot(., aes(x=Skill, y=Frequency))+
+              geom_bar(stat='identity') + 
+  ggtitle("Soft Skills for Data Scientists") + 
+  xlab("Skill") + ylab("Number of postings") +
+  theme(axis.text.x = element_text(angle = 90))
+
+```
+
+
+## Conclusions
+
+From this analysis, we can see that the top 10 skills from this general pull are:
+
+* Near Vision
+* Oral Comprehension
+* Oral Expression
+* Problem Sensitivity
+* Information Ordering
+* Deductive Reasoning
+* Speech Recognition
+* Active Listening
+* Speaking
+* Speech Clarity
+
+The first skill (which is somewhat humorous) can be eliminated from the list. The other skills, however, are very telling of what a data scientist is expected to do. What is most interesting is the number of communication skills at the top of this list -- (**Oral comprehension, oral expression, speaking, and speech clarity**). These are likely top priorities because data scientists are often asked to communicate their findings with others.
+
+
+## Wait, there's more!
+In doing this analysis, we were curious to see if there were datasets available that provided information about top skills required for data scientists. We stumbled upon the following site with some really cool information regarding data science skills that we thought we'd take a look at.  https://www.kaggle.com/discdiver/the-most-in-demand-skills-for-data-scientists/data
+
+```{r}
+library(knitr)
+
+url <- "https://raw.githubusercontent.com/gpadmaperuma/DATA607/master/ds_general_skills_revised.csv"
+ds_skills <- read.csv(url, stringsAsFactors = FALSE)
+```
+
+# Tidying and wrangling
+Let's take a look at the structure and see what type of tidying is needed.
+```{r}
+str(ds_skills)
+```
+
+We removed the commas and numbers from the data and coverted them from character to numeric. 
+```{r}
+ds_skills$LinkedIn <- str_replace_all(ds_skills$LinkedIn, ",", "") %>% as.numeric()
+ds_skills$Indeed <- str_replace_all(ds_skills$Indeed, ",", "") %>% as.numeric()
+ds_skills$SimplyHired <- str_replace_all(ds_skills$SimplyHired, ",", "") %>% as.numeric()
+ds_skills$Monster <- str_replace_all(ds_skills$Monster, ",", "") %>% as.numeric()
+str(ds_skills)
+```
+
+We created a subset by eliminating total rows and unnecessary data.
+```{r}
+ds_skills_subset <- subset(ds_skills, !is.na(LinkedIn))%>%
+  subset((!Keyword == "Total"))
+```
+
+We mutate the data frame to generate a new column Frequence to put the total of all the skill keywords.
+```{r}
+ds_skill2 <- ds_skills_subset %>%
+  mutate(Frequency = LinkedIn + Indeed + SimplyHired + Monster)
+```
+
+# More Tidying
+When going through the data science skill keywords, we found that Artificial intelligence is in three different places. To avoid future confusions, we added **AI** and **artificial intelligence** and then subtracted the overlapping skills. We assigned the values to **AI+artificial intelligence**.   
+
+```{r}
+ds_skill2[18,2:6] <- ds_skill2[16,2:6] + ds_skill2[17,2:6] - ds_skill2[18,2:6]
+```
+
+We did the same thing with **NLP** and **Natural Language Processing**. Updated the **NLP+natural language processing**  
+```{r}
+ds_skill2[21,2:6] <- ds_skill2[19,2:6] + ds_skill2[20,2:6] - ds_skill2[21,2:6]
+```
+
+Now that we have updated the two **AI+artificial intelligence** and **NLP+natural language processing**, It s time to remove the extra rows  
+
+```{r}
+ds_skills_tidy <- ds_skill2[- c(16,17,19,20),]
+```
+
+We created another column **percentage** to put the percentage calculated by deviding the **Frequency** of each keyword skill deviding by overall total frequency.
+
+```{r}
+ds_skills_tidy <- ds_skills_tidy %>%
+  mutate(Percentage = Frequency/sum(Frequency))
+
+```
+
+
+# Analysis and Visualization
+Using the ggplot2 package, we created a bar plot that shows the total frequency of each data science skill mentioned in the jobboards, ranked from highest to lowest.
+
+```{r}
+#creating a color palette with more colors.
+library(RColorBrewer)
+nb.cols <- 18
+mycolor <- colorRampPalette(brewer.pal(8, "Set2"))(nb.cols)
+```
+
+```{r}
+# plot to show top data skills
+library(ggplot2)
+library(RColorBrewer)
+library(ggthemes)
+ggplot(ds_skills_tidy, aes(x = ds_skills_tidy$Keyword, y = ds_skills_tidy$Percentage, fill = as.character(Keyword))) +
+  geom_bar(stat = "Identity", position = "dodge") +
+  geom_text(aes(label = paste0(round(Frequency,1))), hjust=-0.5, color="black", position = position_dodge(1), size = 2) +
+  scale_fill_manual(values = mycolor) +
+  theme(axis.text.x=element_text(angle = 0, vjust = 0.5)) +
+  theme(plot.title = element_text(hjust = 0.5), legend.position = "bottom") +
+  ggtitle("Top Data Science Skills") +
+  xlab("Keyword") +  ylab ("Frequency") +
+  coord_flip()
+```
+
+# Conclusions
+Skills that posted on job sites get different from company to company. Data science is a field that one require tech tools as well as soft skills. This analysis shows that Analysis, Machine Learning and Statistics are top data science skills that companies are looking for. These data are grabbed from top job sites such as Linkedin, Indeed, Monster etc. 
+
+
+
